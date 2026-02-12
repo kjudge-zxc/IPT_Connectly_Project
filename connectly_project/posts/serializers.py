@@ -3,9 +3,19 @@ from .models import User, Post, Comment
 
 
 class UserSerializer(serializers.ModelSerializer):
+    password = serializers.CharField(write_only=True, required=False)  # Never return password
+
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'created_at']
+        fields = ['id', 'username', 'email', 'password', 'created_at']
+
+    def create(self, validated_data):
+        password = validated_data.pop('password', None)
+        user = User.objects.create(**validated_data)
+        if password:
+            user.set_password(password)
+            user.save()
+        return user
 
 
 class PostSerializer(serializers.ModelSerializer):
