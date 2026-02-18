@@ -21,10 +21,10 @@ class UserSerializer(serializers.ModelSerializer):
 class PostSerializer(serializers.ModelSerializer):
     comments = serializers.StringRelatedField(many=True, read_only=True)
 
-
     class Meta:
         model = Post
-        fields = ['id', 'content', 'author', 'created_at', 'comments']
+        fields = ['id', 'title', 'content', 'post_type', 'metadata', 'author', 'created_at', 'comments']
+
 
 
 class CommentSerializer(serializers.ModelSerializer):

@@ -7,6 +7,14 @@ from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnl
 from .permissions import IsPostAuthor, IsCommentAuthor
 from rest_framework.authentication import TokenAuthentication, SessionAuthentication
 
+from singletons.logger_singleton import LoggerSingleton
+from singletons.config_manager import ConfigManager
+from factories.post_factory import PostFactory
+
+
+# Initialize logger
+logger = LoggerSingleton().get_logger()
+config = ConfigManager()
 
 
 class UserListCreate(APIView):
@@ -113,3 +121,69 @@ class ProtectedView(APIView):
 
     def get(self, request):
         return Response({"message": "Authenticated!"})
+    
+
+
+class CreatePostView(APIView):
+    """Create posts using the Factory Pattern."""
+    authentication_classes = [TokenAuthentication, SessionAuthentication]
+    permission_classes = [AllowAny]  # Change to IsAuthenticated for production
+
+    def post(self, request):
+        data = request.data
+        
+        # Log the request
+        logger.info(f"Creating new post of type: {data.get('post_type', 'text')}")
+        
+        try:
+            # Get the author
+            author_id = data.get('author')
+            try:
+                author = User.objects.get(pk=author_id)
+            except User.DoesNotExist:
+                return Response({'error': 'Author not found'}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Use Factory to create the post
+            post = PostFactory.create_post(
+                author=author,
+                post_type=data.get('post_type', 'text'),
+                title=data.get('title', ''),
+                content=data.get('content', ''),
+                metadata=data.get('metadata', {})
+            )
+            
+            logger.info(f"Post created successfully with ID: {post.id}")
+            
+            return Response({
+                'message': 'Post created successfully!',
+                'post_id': post.id,
+                'post_type': post.post_type
+            }, status=status.HTTP_201_CREATED)
+            
+        except ValueError as e:
+            logger.error(f"Post creation failed: {str(e)}")
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class ConfigView(APIView):
+    """View to check and update configuration settings (Singleton demo)."""
+    
+    def get(self, request):
+        """Get all configuration settings."""
+        return Response({
+            'settings': config.settings
+        })
+    
+    def post(self, request):
+        """Update a configuration setting."""
+        key = request.data.get('key')
+        value = request.data.get('value')
+        
+        if key:
+            config.set_setting(key, value)
+            logger.info(f"Config updated: {key} = {value}")
+            return Response({
+                'message': f'Setting {key} updated successfully',
+                'settings': config.settings
+            })
+        return Response({'error': 'Key is required'}, status=status.HTTP_400_BAD_REQUEST)

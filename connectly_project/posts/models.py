@@ -27,13 +27,22 @@ class User(models.Model):
 
 
 class Post(models.Model):
-    content = models.TextField()  # The text content of the post
-    author = models.ForeignKey(User, on_delete=models.CASCADE)  # The user who created the post
-    created_at = models.DateTimeField(auto_now_add=True)  # Timestamp when the post was created
+    # Post type choices
+    POST_TYPES = [
+        ('text', 'Text'),
+        ('image', 'Image'),
+        ('video', 'Video'),
+    ]
 
+    title = models.CharField(max_length=200, blank=True)
+    content = models.TextField()
+    post_type = models.CharField(max_length=10, choices=POST_TYPES, default='text')
+    metadata = models.JSONField(default=dict, blank=True)
+    author = models.ForeignKey(User, on_delete=models.CASCADE)
+    created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return self.content[:50]
+        return self.title if self.title else self.content[:50]
 
 
 

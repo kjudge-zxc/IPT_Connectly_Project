@@ -1,5 +1,14 @@
 from django.urls import path
-from .views import PostDetailView, ProtectedView, UserListCreate, PostListCreate, CommentListCreate, UserLoginView
+from .views import (
+    PostDetailView, 
+    ProtectedView, 
+    UserListCreate, 
+    PostListCreate, 
+    CommentListCreate, 
+    UserLoginView,
+    CreatePostView,
+    ConfigView,
+)
 
 
 urlpatterns = [
@@ -9,4 +18,6 @@ urlpatterns = [
     path('comments/', CommentListCreate.as_view(), name='comment-list-create'),
     path('posts/<int:pk>/', PostDetailView.as_view(), name='post-detail'),
     path('protected/', ProtectedView.as_view(), name='protected'),
+    path('posts/create/', CreatePostView.as_view(), name='create-post'),
+    path('config/', ConfigView.as_view(), name='config'),
 ]
