@@ -1,8 +1,8 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from .models import User, Post, Comment
-from .serializers import UserSerializer, PostSerializer, CommentSerializer
+from .models import User, Post, Comment, Like
+from .serializers import UserSerializer, PostSerializer, CommentSerializer, LikeSerializer
 from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly, AllowAny
 from .permissions import IsPostAuthor, IsCommentAuthor
 from rest_framework.authentication import TokenAuthentication, SessionAuthentication
@@ -132,18 +132,18 @@ class CreatePostView(APIView):
     def post(self, request):
         data = request.data
         
-        # Log the request
+        
         logger.info(f"Creating new post of type: {data.get('post_type', 'text')}")
         
         try:
-            # Get the author
+           
             author_id = data.get('author')
             try:
                 author = User.objects.get(pk=author_id)
             except User.DoesNotExist:
                 return Response({'error': 'Author not found'}, status=status.HTTP_400_BAD_REQUEST)
 
-            # Use Factory to create the post
+           
             post = PostFactory.create_post(
                 author=author,
                 post_type=data.get('post_type', 'text'),
@@ -187,3 +187,74 @@ class ConfigView(APIView):
                 'settings': config.settings
             })
         return Response({'error': 'Key is required'}, status=status.HTTP_400_BAD_REQUEST)
+    
+class PostLikeView(APIView):
+    def post(self, request, pk):
+        try:
+            post = Post.objects.get(pk=pk)
+        except Post.DoesNotExist:
+            logger.warning(f"Like failed: Post {pk} not found")
+            return Response({"error": "Post not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        user_id = request.data.get("user")
+
+        if not user_id:
+            return Response({"error": "User ID is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            user = User.objects.get(pk=user_id)
+        except User.DoesNotExist:
+            return Response({"error": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        like, created = Like.objects.get_or_create(user=user, post=post)
+
+        if created:
+            logger.info(f"{user.username} liked post {post.id}")
+            return Response({"message": "Post liked successfully."}, status=status.HTTP_201_CREATED)
+        else:
+            return Response({"message": "You already liked this post."}, status=status.HTTP_200_OK)
+
+
+class PostCommentCreateView(APIView):
+    def post(self, request, pk):
+        try:
+            post = Post.objects.get(pk=pk)
+        except Post.DoesNotExist:
+            logger.warning(f"Comment failed: Post {pk} not found")
+            return Response({"error": "Post not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        user_id = request.data.get("user")
+        text = request.data.get("text")
+
+        if not user_id:
+            return Response({"error": "User ID is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not text:
+            return Response({"error": "Text is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            user = User.objects.get(pk=user_id)
+        except User.DoesNotExist:
+            return Response({"error": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        comment = Comment.objects.create(
+            text=text,
+            author=user,
+            post=post
+        )
+
+        logger.info(f"{user.username} commented on post {post.id}")
+
+        serializer = CommentSerializer(comment)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+class PostCommentsListView(APIView):
+    def get(self, request, pk):
+        try:
+            post = Post.objects.get(pk=pk)
+        except Post.DoesNotExist:
+            return Response({"error": "Post not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        comments = Comment.objects.filter(post=post).order_by('-created_at')
+        serializer = CommentSerializer(comments, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)

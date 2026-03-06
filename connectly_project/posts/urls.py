@@ -8,6 +8,9 @@ from .views import (
     UserLoginView,
     CreatePostView,
     ConfigView,
+    PostLikeView,
+    PostCommentCreateView,
+    PostCommentsListView,
 )
 
 
@@ -20,4 +23,7 @@ urlpatterns = [
     path('protected/', ProtectedView.as_view(), name='protected'),
     path('posts/create/', CreatePostView.as_view(), name='create-post'),
     path('config/', ConfigView.as_view(), name='config'),
+    path('posts/<int:pk>/like/', PostLikeView.as_view(), name='post-like'),
+    path('posts/<int:pk>/comment/', PostCommentCreateView.as_view(), name='post-comment'),
+    path('posts/<int:pk>/comments/', PostCommentsListView.as_view(), name='post-comments'), 
 ]
