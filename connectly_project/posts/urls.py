@@ -13,6 +13,7 @@ from .views import (
     PostCommentsListView,
 )
 
+from .google_auth import GoogleLoginView, GoogleAuthStatusView
 
 urlpatterns = [
     path('users/', UserListCreate.as_view(), name='user-list-create'),
@@ -26,4 +27,8 @@ urlpatterns = [
     path('posts/<int:pk>/like/', PostLikeView.as_view(), name='post-like'),
     path('posts/<int:pk>/comment/', PostCommentCreateView.as_view(), name='post-comment'),
     path('posts/<int:pk>/comments/', PostCommentsListView.as_view(), name='post-comments'), 
+
+    # Google OAuth endpoints
+    path('auth/google/login/', GoogleLoginView.as_view(), name='google-login'),
+    path('auth/google/status/', GoogleAuthStatusView.as_view(), name='google-status'),
 ]
