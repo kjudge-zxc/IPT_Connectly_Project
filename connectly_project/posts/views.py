@@ -1,11 +1,12 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from .models import User, Post, Comment, Like
-from .serializers import UserSerializer, PostSerializer, CommentSerializer, LikeSerializer
+from .models import User, Post, Comment, Like, Follow
+from .serializers import UserSerializer, PostSerializer, CommentSerializer, LikeSerializer, FollowSerializer
 from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly, AllowAny
 from .permissions import IsPostAuthor, IsCommentAuthor
 from rest_framework.authentication import TokenAuthentication
+from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
 
 from singletons.logger_singleton import LoggerSingleton
 from singletons.config_manager import ConfigManager
@@ -272,3 +273,208 @@ class PostCommentsListView(APIView):
         comments = Comment.objects.filter(post=post).order_by('-created_at')
         serializer = CommentSerializer(comments, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
+    
+
+
+class FeedView(APIView):
+    """
+    News Feed endpoint.
+    
+    GET /feed/ - Get paginated posts sorted by date (newest first)
+    
+    Query Parameters:
+    - page: Page number (default: 1)
+    - page_size: Number of posts per page (default: 10, max: 50)
+    - user_id: Filter posts by a specific user (optional)
+    - feed_type: Type of feed - 'all', 'following', 'liked' (default: 'all')
+    """
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        # Get query parameters
+        page = request.query_params.get('page', 1)
+        page_size = request.query_params.get('page_size', config.get_setting('DEFAULT_PAGE_SIZE') or 10)
+        user_id = request.query_params.get('user_id')
+        feed_type = request.query_params.get('feed_type', 'all')
+
+        # Limit page_size to max 50
+        try:
+            page_size = min(int(page_size), 50)
+        except (ValueError, TypeError):
+            page_size = 10
+
+        # Base queryset - all posts sorted by newest first
+        posts = Post.objects.all().order_by('-created_at')
+
+        # Apply filters based on feed_type
+        if feed_type == 'following' and user_id:
+            # Get posts from users that the specified user follows
+            try:
+                user = User.objects.get(pk=user_id)
+                following_ids = Follow.objects.filter(follower=user).values_list('following_id', flat=True)
+                posts = posts.filter(author_id__in=following_ids)
+                logger.info(f"Feed filtered by following for user {user_id}")
+            except User.DoesNotExist:
+                return Response({"error": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        elif feed_type == 'liked' and user_id:
+            # Get posts that the specified user has liked
+            try:
+                user = User.objects.get(pk=user_id)
+                liked_post_ids = Like.objects.filter(user=user).values_list('post_id', flat=True)
+                posts = posts.filter(id__in=liked_post_ids)
+                logger.info(f"Feed filtered by liked posts for user {user_id}")
+            except User.DoesNotExist:
+                return Response({"error": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        elif user_id:
+            # Filter posts by specific author
+            posts = posts.filter(author_id=user_id)
+
+        # Optimize query - preload related data
+        posts = posts.select_related('author').prefetch_related('comments', 'likes')
+
+        # Paginate results
+        paginator = Paginator(posts, page_size)
+
+        try:
+            paginated_posts = paginator.page(page)
+        except PageNotAnInteger:
+            paginated_posts = paginator.page(1)
+        except EmptyPage:
+            paginated_posts = paginator.page(paginator.num_pages)
+
+        # Serialize the posts
+        serializer = PostSerializer(paginated_posts, many=True)
+
+        # Build response with pagination info
+        response_data = {
+            'count': paginator.count,
+            'total_pages': paginator.num_pages,
+            'current_page': paginated_posts.number,
+            'page_size': page_size,
+            'has_next': paginated_posts.has_next(),
+            'has_previous': paginated_posts.has_previous(),
+            'results': serializer.data
+        }
+
+        logger.info(f"Feed retrieved: page {paginated_posts.number}/{paginator.num_pages}, {paginator.count} total posts")
+
+        return Response(response_data, status=status.HTTP_200_OK)
+
+
+class FollowUserView(APIView):
+    """
+    Follow/Unfollow a user.
+    
+    POST /users/{id}/follow/ - Follow a user
+    DELETE /users/{id}/follow/ - Unfollow a user
+    """
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [AllowAny]
+
+    def post(self, request, pk):
+        """Follow a user."""
+        follower_id = request.data.get('follower_id')
+
+        if not follower_id:
+            return Response({"error": "follower_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            follower = User.objects.get(pk=follower_id)
+        except User.DoesNotExist:
+            return Response({"error": "Follower user not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            following = User.objects.get(pk=pk)
+        except User.DoesNotExist:
+            return Response({"error": "User to follow not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if follower == following:
+            return Response({"error": "You cannot follow yourself."}, status=status.HTTP_400_BAD_REQUEST)
+
+        follow, created = Follow.objects.get_or_create(follower=follower, following=following)
+
+        if created:
+            logger.info(f"{follower.username} started following {following.username}")
+            return Response({
+                "message": f"You are now following {following.username}."
+            }, status=status.HTTP_201_CREATED)
+        else:
+            return Response({
+                "message": f"You are already following {following.username}."
+            }, status=status.HTTP_200_OK)
+
+    def delete(self, request, pk):
+        """Unfollow a user."""
+        follower_id = request.data.get('follower_id')
+
+        if not follower_id:
+            return Response({"error": "follower_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            follower = User.objects.get(pk=follower_id)
+        except User.DoesNotExist:
+            return Response({"error": "Follower user not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            following = User.objects.get(pk=pk)
+        except User.DoesNotExist:
+            return Response({"error": "User to unfollow not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            follow = Follow.objects.get(follower=follower, following=following)
+            follow.delete()
+            logger.info(f"{follower.username} unfollowed {following.username}")
+            return Response({
+                "message": f"You have unfollowed {following.username}."
+            }, status=status.HTTP_200_OK)
+        except Follow.DoesNotExist:
+            return Response({
+                "error": f"You are not following {following.username}."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+
+class UserFollowersView(APIView):
+    """Get a user's followers."""
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [AllowAny]
+
+    def get(self, request, pk):
+        try:
+            user = User.objects.get(pk=pk)
+        except User.DoesNotExist:
+            return Response({"error": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        followers = Follow.objects.filter(following=user).select_related('follower')
+        follower_users = [f.follower for f in followers]
+        serializer = UserSerializer(follower_users, many=True)
+
+        return Response({
+            "user": user.username,
+            "followers_count": len(follower_users),
+            "followers": serializer.data
+        }, status=status.HTTP_200_OK)
+
+
+class UserFollowingView(APIView):
+    """Get users that a user is following."""
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [AllowAny]
+
+    def get(self, request, pk):
+        try:
+            user = User.objects.get(pk=pk)
+        except User.DoesNotExist:
+            return Response({"error": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        following = Follow.objects.filter(follower=user).select_related('following')
+        following_users = [f.following for f in following]
+        serializer = UserSerializer(following_users, many=True)
+
+        return Response({
+            "user": user.username,
+            "following_count": len(following_users),
+            "following": serializer.data
+        }, status=status.HTTP_200_OK)

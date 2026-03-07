@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import User, Post, Comment, Like
+from .models import User, Post, Comment, Like, Follow
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -64,4 +64,21 @@ class LikeSerializer(serializers.ModelSerializer):
         """Prevent duplicate likes."""
         if Like.objects.filter(user=data['user'], post=data['post']).exists():
             raise serializers.ValidationError("You have already liked this post.")
+        return data
+
+
+class FollowSerializer(serializers.ModelSerializer):
+    follower_username = serializers.CharField(source='follower.username', read_only=True)
+    following_username = serializers.CharField(source='following.username', read_only=True)
+
+    class Meta:
+        model = Follow
+        fields = ['id', 'follower', 'follower_username', 'following', 'following_username', 'created_at']
+
+    def validate(self, data):
+        """Prevent users from following themselves."""
+        if data['follower'] == data['following']:
+            raise serializers.ValidationError("You cannot follow yourself.")
+        if Follow.objects.filter(follower=data['follower'], following=data['following']).exists():
+            raise serializers.ValidationError("You are already following this user.")
         return data
