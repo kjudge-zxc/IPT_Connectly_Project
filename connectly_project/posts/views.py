@@ -5,7 +5,7 @@ from .models import User, Post, Comment, Like
 from .serializers import UserSerializer, PostSerializer, CommentSerializer, LikeSerializer
 from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly, AllowAny
 from .permissions import IsPostAuthor, IsCommentAuthor
-from rest_framework.authentication import TokenAuthentication, SessionAuthentication
+from rest_framework.authentication import TokenAuthentication
 
 from singletons.logger_singleton import LoggerSingleton
 from singletons.config_manager import ConfigManager
@@ -18,11 +18,13 @@ config = ConfigManager()
 
 
 class UserListCreate(APIView):
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [AllowAny]
+
     def get(self, request):
         users = User.objects.all()
         serializer = UserSerializer(users, many=True)
         return Response(serializer.data)
-
 
     def post(self, request):
         serializer = UserSerializer(data=request.data)
@@ -33,15 +35,13 @@ class UserListCreate(APIView):
 
 
 class PostListCreate(APIView):
-    authentication_classes = [TokenAuthentication, SessionAuthentication]
-    permission_classes = [IsAuthenticatedOrReadOnly]
-    ## permission_classes = [AllowAny] ## For testing
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [AllowAny]
 
     def get(self, request):
         posts = Post.objects.all()
         serializer = PostSerializer(posts, many=True)
         return Response(serializer.data)
-
 
     def post(self, request):
         serializer = PostSerializer(data=request.data)
@@ -52,11 +52,13 @@ class PostListCreate(APIView):
 
 
 class CommentListCreate(APIView):
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [AllowAny]
+
     def get(self, request):
         comments = Comment.objects.all()
         serializer = CommentSerializer(comments, many=True)
         return Response(serializer.data)
-
 
     def post(self, request):
         serializer = CommentSerializer(data=request.data)
@@ -66,8 +68,10 @@ class CommentListCreate(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-
 class UserLoginView(APIView):
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [AllowAny]
+
     def post(self, request):
         username = request.data.get('username')
         password = request.data.get('password')
@@ -80,10 +84,11 @@ class UserLoginView(APIView):
                 return Response({"error": "Invalid credentials."}, status=status.HTTP_401_UNAUTHORIZED)
         except User.DoesNotExist:
             return Response({"error": "Invalid credentials."}, status=status.HTTP_401_UNAUTHORIZED)
-        
+
 
 class PostDetailView(APIView):
-    permission_classes = [IsAuthenticatedOrReadOnly, IsPostAuthor]
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [AllowAny]
 
     def get(self, request, pk):
         try:
@@ -96,7 +101,7 @@ class PostDetailView(APIView):
     def put(self, request, pk):
         try:
             post = Post.objects.get(pk=pk)
-            self.check_object_permissions(request, post)  # Check if user is author
+            self.check_object_permissions(request, post)
             serializer = PostSerializer(post, data=request.data)
             if serializer.is_valid():
                 serializer.save()
@@ -108,12 +113,12 @@ class PostDetailView(APIView):
     def delete(self, request, pk):
         try:
             post = Post.objects.get(pk=pk)
-            self.check_object_permissions(request, post)  # Check if user is author
+            self.check_object_permissions(request, post)
             post.delete()
             return Response({"message": "Post deleted."}, status=status.HTTP_204_NO_CONTENT)
         except Post.DoesNotExist:
             return Response({"error": "Post not found."}, status=status.HTTP_404_NOT_FOUND)
-        
+
 
 class ProtectedView(APIView):
     authentication_classes = [TokenAuthentication]
@@ -121,29 +126,25 @@ class ProtectedView(APIView):
 
     def get(self, request):
         return Response({"message": "Authenticated!"})
-    
 
 
 class CreatePostView(APIView):
     """Create posts using the Factory Pattern."""
-    authentication_classes = [TokenAuthentication, SessionAuthentication]
-    permission_classes = [AllowAny]  # Change to IsAuthenticated for production
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [AllowAny]
 
     def post(self, request):
         data = request.data
         
-        
         logger.info(f"Creating new post of type: {data.get('post_type', 'text')}")
         
         try:
-           
             author_id = data.get('author')
             try:
                 author = User.objects.get(pk=author_id)
             except User.DoesNotExist:
                 return Response({'error': 'Author not found'}, status=status.HTTP_400_BAD_REQUEST)
 
-           
             post = PostFactory.create_post(
                 author=author,
                 post_type=data.get('post_type', 'text'),
@@ -167,6 +168,8 @@ class CreatePostView(APIView):
 
 class ConfigView(APIView):
     """View to check and update configuration settings (Singleton demo)."""
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [AllowAny]
     
     def get(self, request):
         """Get all configuration settings."""
@@ -187,8 +190,12 @@ class ConfigView(APIView):
                 'settings': config.settings
             })
         return Response({'error': 'Key is required'}, status=status.HTTP_400_BAD_REQUEST)
-    
+
+
 class PostLikeView(APIView):
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [AllowAny]
+
     def post(self, request, pk):
         try:
             post = Post.objects.get(pk=pk)
@@ -216,6 +223,9 @@ class PostLikeView(APIView):
 
 
 class PostCommentCreateView(APIView):
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [AllowAny]
+
     def post(self, request, pk):
         try:
             post = Post.objects.get(pk=pk)
@@ -248,7 +258,11 @@ class PostCommentCreateView(APIView):
         serializer = CommentSerializer(comment)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
+
 class PostCommentsListView(APIView):
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [AllowAny]
+
     def get(self, request, pk):
         try:
             post = Post.objects.get(pk=pk)
