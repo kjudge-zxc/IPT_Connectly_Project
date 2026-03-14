@@ -18,7 +18,15 @@ logger = LoggerSingleton().get_logger()
 config = ConfigManager()
 
 
+
+
 class UserListCreate(APIView):
+    """
+    API endpoint for user management.
+    
+    GET: Retrieve a list of all users.
+    POST: Create a new user with username, email, and password.
+    """
     authentication_classes = [TokenAuthentication]
     permission_classes = [AllowAny]
 
@@ -36,6 +44,12 @@ class UserListCreate(APIView):
 
 
 class PostListCreate(APIView):
+    """
+    API endpoint for post management.
+    
+    GET: Retrieve a list of all posts.
+    POST: Create a new post (use /posts/create/ for Factory Pattern creation).
+    """
     authentication_classes = [TokenAuthentication]
     permission_classes = [AllowAny]
 
@@ -53,6 +67,12 @@ class PostListCreate(APIView):
 
 
 class CommentListCreate(APIView):
+    """
+    API endpoint for comment management.
+    
+    GET: Retrieve a list of all comments.
+    POST: Create a new comment on a post.
+    """
     authentication_classes = [TokenAuthentication]
     permission_classes = [AllowAny]
 
@@ -70,6 +90,13 @@ class CommentListCreate(APIView):
 
 
 class UserLoginView(APIView):
+    """
+    API endpoint for user authentication.
+    
+    POST: Authenticate a user with username and password.
+    Returns success message if credentials are valid.
+    Uses Argon2 password hashing for secure verification.
+    """
     authentication_classes = [TokenAuthentication]
     permission_classes = [AllowAny]
 
@@ -88,6 +115,13 @@ class UserLoginView(APIView):
 
 
 class PostDetailView(APIView):
+    """
+    API endpoint for single post operations.
+    
+    GET: Retrieve a specific post by ID.
+    PUT: Update a post (author only).
+    DELETE: Delete a post (author only).
+    """
     authentication_classes = [TokenAuthentication]
     permission_classes = [AllowAny]
 
@@ -122,6 +156,12 @@ class PostDetailView(APIView):
 
 
 class ProtectedView(APIView):
+    """
+    Protected endpoint requiring token authentication.
+    
+    GET: Returns success message if user is authenticated.
+    Used to verify token-based authentication is working.
+    """
     authentication_classes = [TokenAuthentication]
     permission_classes = [IsAuthenticated]
 
@@ -194,6 +234,13 @@ class ConfigView(APIView):
 
 
 class PostLikeView(APIView):
+    """
+    API endpoint for liking posts.
+    
+    POST: Like a post. Requires user ID in request body.
+    Prevents duplicate likes using unique_together constraint.
+    Uses LoggerSingleton to track like activity.
+    """
     authentication_classes = [TokenAuthentication]
     permission_classes = [AllowAny]
 
@@ -224,6 +271,13 @@ class PostLikeView(APIView):
 
 
 class PostCommentCreateView(APIView):
+    """
+    API endpoint for adding comments to a specific post.
+    
+    POST: Create a comment on the specified post.
+    Requires user ID and text in request body.
+    Uses LoggerSingleton to track comment activity.
+    """
     authentication_classes = [TokenAuthentication]
     permission_classes = [AllowAny]
 
@@ -261,6 +315,11 @@ class PostCommentCreateView(APIView):
 
 
 class PostCommentsListView(APIView):
+    """
+    API endpoint for retrieving comments on a post.
+    
+    GET: Retrieve all comments for a specific post, sorted by newest first.
+    """
     authentication_classes = [TokenAuthentication]
     permission_classes = [AllowAny]
 
@@ -294,7 +353,7 @@ class FeedView(APIView):
     def get(self, request):
         # Get query parameters
         page = request.query_params.get('page', 1)
-        page_size = request.query_params.get('page_size', config.get_setting('DEFAULT_PAGE_SIZE') or 10)
+        page_size = request.query_params.get('page_size', config.get_setting('DEFAULT_PAGE_SIZE'))
         user_id = request.query_params.get('user_id')
         feed_type = request.query_params.get('feed_type', 'all')
 
