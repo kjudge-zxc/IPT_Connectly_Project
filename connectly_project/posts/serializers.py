@@ -1,35 +1,13 @@
 """
-Serializers for the Connectly API.
+Serializers for the Connectly Posts API.
 
 Serializers handle conversion between Django model instances
 and JSON data for API requests/responses.
 """
 
 from rest_framework import serializers
-from .models import User, Post, Comment, Like, Follow
-
-
-class UserSerializer(serializers.ModelSerializer):
-    """
-    Serializer for User model.
-    
-    Handles user creation with secure password hashing.
-    Password field is write-only (never returned in responses).
-    """
-    password = serializers.CharField(write_only=True, required=False)
-
-    class Meta:
-        model = User
-        fields = ['id', 'username', 'email', 'password', 'created_at']
-
-    def create(self, validated_data):
-        """Create a new user with hashed password."""
-        password = validated_data.pop('password', None)
-        user = User.objects.create(**validated_data)
-        if password:
-            user.set_password(password)
-            user.save()
-        return user
+from users.models import User
+from .models import Post, Comment, Like, Follow
 
 
 class PostSerializer(serializers.ModelSerializer):

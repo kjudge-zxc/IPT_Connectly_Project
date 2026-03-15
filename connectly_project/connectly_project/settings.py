@@ -40,6 +40,7 @@ INSTALLED_APPS = [
     'django.contrib.sites',         # Required for allauth
     'rest_framework',               # Add Django REST Framework
     'posts',                        # Add Posts app
+    'users',                        # Add Users app
     'rest_framework.authtoken',
     'django_extensions',
 

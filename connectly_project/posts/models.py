@@ -1,8 +1,7 @@
 """
-Models for the Connectly social media application.
+Models for the Connectly posts and interactions.
 
-This module defines the core data models:
-- User: Custom user model with secure password hashing
+This module defines:
 - Post: Content posts with support for text, image, and video types
 - Comment: User comments on posts
 - Like: User likes on posts (unique per user-post pair)
@@ -10,37 +9,7 @@ This module defines the core data models:
 """
 
 from django.db import models
-from django.contrib.auth.hashers import make_password, check_password
-
-
-class User(models.Model):
-    """
-    Custom user model for Connectly.
-    
-    Uses Django's password hashing utilities (Argon2 by default)
-    for secure password storage and verification.
-    
-    Attributes:
-        username: Unique username for the user
-        email: Unique email address
-        password: Hashed password (never stored in plain text)
-        created_at: Timestamp when user was created
-    """
-    username = models.CharField(max_length=100, unique=True)
-    email = models.EmailField(unique=True)
-    password = models.CharField(max_length=128, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    def set_password(self, raw_password):
-        """Hash and store the password using Argon2 algorithm."""
-        self.password = make_password(raw_password)
-
-    def check_password(self, raw_password):
-        """Verify a plain text password against the stored hash."""
-        return check_password(raw_password, self.password)
-
-    def __str__(self):
-        return self.username
+from users.models import User  # Import from users app
 
 
 class Post(models.Model):
