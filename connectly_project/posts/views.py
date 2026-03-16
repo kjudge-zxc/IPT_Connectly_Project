@@ -1,7 +1,8 @@
 """
 Views for the Connectly Posts API.
 
-Handles post CRUD operations, comments, likes, and news feed.
+Handles post CRUD operations, comments, likes, and news feed
+with Role-Based Access Control (RBAC) and privacy settings.
 """
 
 from rest_framework.views import APIView
@@ -14,6 +15,7 @@ from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
 from users.models import User
 from .models import Post, Comment, Like, Follow
 from .serializers import PostSerializer, CommentSerializer
+from .permissions import IsAdmin, IsModeratorOrAbove, IsPostAuthorOrAdmin, CanViewPost
 from singletons.logger_singleton import LoggerSingleton
 from singletons.config_manager import ConfigManager
 from factories.post_factory import PostFactory
@@ -23,87 +25,147 @@ logger = LoggerSingleton().get_logger()
 config = ConfigManager()
 
 
+def get_user_from_request(request):
+    """
+    Helper function to get the Connectly user from request.
+    
+    Checks for user_id in query params or request data.
+    Returns None if no valid user found.
+    """
+    user_id = request.query_params.get('user_id') or request.data.get('user_id')
+    if user_id:
+        try:
+            return User.objects.get(pk=user_id)
+        except User.DoesNotExist:
+            return None
+    return None
+
+
 class PostListCreate(APIView):
     """
     API endpoint for post management.
     
-    GET: Retrieve a list of all posts.
-    POST: Create a new post (use /posts/create/ for Factory Pattern creation).
+    GET: Retrieve a list of all public posts.
+    POST: Create a new post with optional privacy setting.
     """
     authentication_classes = [TokenAuthentication]
     permission_classes = [AllowAny]
 
     def get(self, request):
-        """Return all posts."""
-        posts = Post.objects.all()
-        serializer = PostSerializer(posts, many=True)
+        """Return all public posts (privacy-aware)."""
+        user = get_user_from_request(request)
+        
+        # Get all posts
+        posts = Post.objects.all().order_by('-created_at')
+        
+        # Filter based on privacy settings
+        visible_posts = [post for post in posts if post.is_visible_to(user)]
+        
+        serializer = PostSerializer(visible_posts, many=True)
         return Response(serializer.data)
 
     def post(self, request):
-        """Create a new post."""
+        """Create a new post with privacy setting."""
         serializer = PostSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save()
+            logger.info(f"Post created with privacy: {request.data.get('privacy', 'public')}")
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 class PostDetailView(APIView):
     """
-    API endpoint for single post operations.
+    API endpoint for single post operations with RBAC.
     
-    GET: Retrieve a specific post by ID.
-    PUT: Update a post (author only).
-    DELETE: Delete a post (author only).
+    GET: Retrieve a post (respects privacy settings).
+    PUT: Update a post (author or admin only).
+    DELETE: Delete a post (author or admin only).
     """
     authentication_classes = [TokenAuthentication]
     permission_classes = [AllowAny]
 
     def get(self, request, pk):
-        """Return a specific post."""
+        """Return a specific post if user has permission to view it."""
         try:
             post = Post.objects.get(pk=pk)
-            serializer = PostSerializer(post)
-            return Response(serializer.data)
         except Post.DoesNotExist:
             return Response({"error": "Post not found."}, status=status.HTTP_404_NOT_FOUND)
+        
+        user = get_user_from_request(request)
+        
+        # Check privacy permissions
+        if not post.is_visible_to(user):
+            logger.warning(f"Access denied to post {pk} for user {user}")
+            return Response(
+                {"error": "You do not have permission to view this post."}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        serializer = PostSerializer(post)
+        return Response(serializer.data)
 
     def put(self, request, pk):
-        """Update a specific post."""
+        """Update a post (author or admin only)."""
         try:
             post = Post.objects.get(pk=pk)
-            self.check_object_permissions(request, post)
-            serializer = PostSerializer(post, data=request.data)
-            if serializer.is_valid():
-                serializer.save()
-                return Response(serializer.data)
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         except Post.DoesNotExist:
             return Response({"error": "Post not found."}, status=status.HTTP_404_NOT_FOUND)
+        
+        user = get_user_from_request(request)
+        
+        if user is None:
+            return Response({"error": "user_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Check if user can modify the post
+        if not (user.is_admin() or post.author_id == user.id):
+            logger.warning(f"User {user.username} attempted to update post {pk} without permission")
+            return Response(
+                {"error": "You do not have permission to update this post."}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        serializer = PostSerializer(post, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            logger.info(f"Post {pk} updated by {user.username}")
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def delete(self, request, pk):
-        """Delete a specific post."""
+        """Delete a post (author or admin only)."""
         try:
             post = Post.objects.get(pk=pk)
-            self.check_object_permissions(request, post)
-            post.delete()
-            return Response({"message": "Post deleted."}, status=status.HTTP_204_NO_CONTENT)
         except Post.DoesNotExist:
             return Response({"error": "Post not found."}, status=status.HTTP_404_NOT_FOUND)
+        
+        user = get_user_from_request(request)
+        
+        if user is None:
+            return Response({"error": "user_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Check if user can delete the post
+        if not (user.is_admin() or post.author_id == user.id):
+            logger.warning(f"User {user.username} attempted to delete post {pk} without permission")
+            return Response(
+                {"error": "You do not have permission to delete this post."}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        post.delete()
+        logger.info(f"Post {pk} deleted by {user.username} (role: {user.role})")
+        return Response({"message": "Post deleted successfully."}, status=status.HTTP_200_OK)
 
 
 class CreatePostView(APIView):
     """
-    Create posts using the Factory Pattern.
-    
-    POST: Create a new post with type-specific validation.
-    Demonstrates Factory design pattern usage.
+    Create posts using the Factory Pattern with privacy settings.
     """
     authentication_classes = [TokenAuthentication]
     permission_classes = [AllowAny]
 
     def post(self, request):
-        """Create a post using PostFactory."""
+        """Create a post using PostFactory with privacy setting."""
         data = request.data
         
         logger.info(f"Creating new post of type: {data.get('post_type', 'text')}")
@@ -123,12 +185,19 @@ class CreatePostView(APIView):
                 metadata=data.get('metadata', {})
             )
             
-            logger.info(f"Post created successfully with ID: {post.id}")
+            # Set privacy setting
+            privacy = data.get('privacy', 'public')
+            if privacy in ['public', 'private', 'friends_only']:
+                post.privacy = privacy
+                post.save()
+            
+            logger.info(f"Post created with ID: {post.id}, privacy: {post.privacy}")
             
             return Response({
                 'message': 'Post created successfully!',
                 'post_id': post.id,
-                'post_type': post.post_type
+                'post_type': post.post_type,
+                'privacy': post.privacy
             }, status=status.HTTP_201_CREATED)
             
         except ValueError as e:
@@ -139,9 +208,6 @@ class CreatePostView(APIView):
 class CommentListCreate(APIView):
     """
     API endpoint for comment management.
-    
-    GET: Retrieve a list of all comments.
-    POST: Create a new comment on a post.
     """
     authentication_classes = [TokenAuthentication]
     permission_classes = [AllowAny]
@@ -161,19 +227,56 @@ class CommentListCreate(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
+class CommentDeleteView(APIView):
+    """
+    API endpoint for deleting comments with RBAC.
+    
+    DELETE: Delete a comment (comment author, post author, moderator, or admin).
+    """
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [AllowAny]
+
+    def delete(self, request, pk):
+        """Delete a comment with role-based permissions."""
+        try:
+            comment = Comment.objects.get(pk=pk)
+        except Comment.DoesNotExist:
+            return Response({"error": "Comment not found."}, status=status.HTTP_404_NOT_FOUND)
+        
+        user = get_user_from_request(request)
+        
+        if user is None:
+            return Response({"error": "user_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Check permissions: admin, moderator, comment author, or post author
+        can_delete = (
+            user.is_admin() or
+            user.is_moderator() or
+            comment.author_id == user.id or
+            comment.post.author_id == user.id
+        )
+        
+        if not can_delete:
+            logger.warning(f"User {user.username} attempted to delete comment {pk} without permission")
+            return Response(
+                {"error": "You do not have permission to delete this comment."}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        comment.delete()
+        logger.info(f"Comment {pk} deleted by {user.username} (role: {user.role})")
+        return Response({"message": "Comment deleted successfully."}, status=status.HTTP_200_OK)
+
+
 class PostLikeView(APIView):
     """
-    API endpoint for liking posts.
-    
-    POST: Like a post. Requires user ID in request body.
-    Prevents duplicate likes using unique_together constraint.
-    Uses LoggerSingleton to track like activity.
+    API endpoint for liking posts with privacy enforcement.
     """
     authentication_classes = [TokenAuthentication]
     permission_classes = [AllowAny]
 
     def post(self, request, pk):
-        """Like a post."""
+        """Like a post (only if user can view it)."""
         try:
             post = Post.objects.get(pk=pk)
         except Post.DoesNotExist:
@@ -181,7 +284,6 @@ class PostLikeView(APIView):
             return Response({"error": "Post not found."}, status=status.HTTP_404_NOT_FOUND)
 
         user_id = request.data.get("user")
-
         if not user_id:
             return Response({"error": "User ID is required."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -189,6 +291,13 @@ class PostLikeView(APIView):
             user = User.objects.get(pk=user_id)
         except User.DoesNotExist:
             return Response({"error": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Check if user can view the post before liking
+        if not post.is_visible_to(user):
+            return Response(
+                {"error": "You cannot like a post you don't have access to."}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
 
         like, created = Like.objects.get_or_create(user=user, post=post)
 
@@ -201,17 +310,13 @@ class PostLikeView(APIView):
 
 class PostCommentCreateView(APIView):
     """
-    API endpoint for adding comments to a specific post.
-    
-    POST: Create a comment on the specified post.
-    Requires user ID and text in request body.
-    Uses LoggerSingleton to track comment activity.
+    API endpoint for adding comments with privacy enforcement.
     """
     authentication_classes = [TokenAuthentication]
     permission_classes = [AllowAny]
 
     def post(self, request, pk):
-        """Add a comment to a post."""
+        """Add a comment to a post (only if user can view it)."""
         try:
             post = Post.objects.get(pk=pk)
         except Post.DoesNotExist:
@@ -223,7 +328,6 @@ class PostCommentCreateView(APIView):
 
         if not user_id:
             return Response({"error": "User ID is required."}, status=status.HTTP_400_BAD_REQUEST)
-
         if not text:
             return Response({"error": "Text is required."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -232,12 +336,14 @@ class PostCommentCreateView(APIView):
         except User.DoesNotExist:
             return Response({"error": "User not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        comment = Comment.objects.create(
-            text=text,
-            author=user,
-            post=post
-        )
+        # Check if user can view the post before commenting
+        if not post.is_visible_to(user):
+            return Response(
+                {"error": "You cannot comment on a post you don't have access to."}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
 
+        comment = Comment.objects.create(text=text, author=user, post=post)
         logger.info(f"{user.username} commented on post {post.id}")
 
         serializer = CommentSerializer(comment)
@@ -247,18 +353,25 @@ class PostCommentCreateView(APIView):
 class PostCommentsListView(APIView):
     """
     API endpoint for retrieving comments on a post.
-    
-    GET: Retrieve all comments for a specific post, sorted by newest first.
     """
     authentication_classes = [TokenAuthentication]
     permission_classes = [AllowAny]
 
     def get(self, request, pk):
-        """Return all comments for a post."""
+        """Return all comments for a post (if user can view the post)."""
         try:
             post = Post.objects.get(pk=pk)
         except Post.DoesNotExist:
             return Response({"error": "Post not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        user = get_user_from_request(request)
+        
+        # Check if user can view the post
+        if not post.is_visible_to(user):
+            return Response(
+                {"error": "You do not have permission to view this post's comments."}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
 
         comments = Comment.objects.filter(post=post).order_by('-created_at')
         serializer = CommentSerializer(comments, many=True)
@@ -267,39 +380,32 @@ class PostCommentsListView(APIView):
 
 class FeedView(APIView):
     """
-    News Feed endpoint.
+    News Feed endpoint with privacy filtering.
     
-    GET /feed/ - Get paginated posts sorted by date (newest first)
-    
-    Query Parameters:
-    - page: Page number (default: 1)
-    - page_size: Number of posts per page (default from ConfigManager Singleton)
-    - user_id: Filter posts by a specific user (optional)
-    - feed_type: Type of feed - 'all', 'following', 'liked' (default: 'all')
-    
-    Uses ConfigManager Singleton for DEFAULT_PAGE_SIZE setting.
+    Only returns posts the user has permission to view based on privacy settings.
     """
     authentication_classes = [TokenAuthentication]
     permission_classes = [AllowAny]
 
     def get(self, request):
-        """Return paginated news feed."""
-        # Get query parameters (uses ConfigManager Singleton for default page size)
+        """Return paginated news feed with privacy filtering."""
         page = request.query_params.get('page', 1)
         page_size = request.query_params.get('page_size', config.get_setting('DEFAULT_PAGE_SIZE'))
         user_id = request.query_params.get('user_id')
         feed_type = request.query_params.get('feed_type', 'all')
 
-        # Limit page_size to max 50
+        # Get requesting user for privacy checks
+        requesting_user = get_user_from_request(request)
+
         try:
             page_size = min(int(page_size), 50)
         except (ValueError, TypeError):
             page_size = config.get_setting('DEFAULT_PAGE_SIZE')
 
-        # Base queryset - all posts sorted by newest first
+        # Base queryset
         posts = Post.objects.all().order_by('-created_at')
 
-        # Apply filters based on feed_type
+        # Apply feed_type filters
         if feed_type == 'following' and user_id:
             try:
                 user = User.objects.get(pk=user_id)
@@ -318,35 +424,39 @@ class FeedView(APIView):
             except User.DoesNotExist:
                 return Response({"error": "User not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        elif user_id:
-            posts = posts.filter(author_id=user_id)
+        # Filter posts based on privacy settings
+        visible_posts = [post for post in posts if post.is_visible_to(requesting_user)]
 
-        # Optimize query - preload related data
-        posts = posts.select_related('author').prefetch_related('comments', 'likes')
-
-        # Paginate results
-        paginator = Paginator(posts, page_size)
+        # Manual pagination for filtered list
+        total_count = len(visible_posts)
+        total_pages = (total_count + page_size - 1) // page_size if page_size > 0 else 1
 
         try:
-            paginated_posts = paginator.page(page)
-        except PageNotAnInteger:
-            paginated_posts = paginator.page(1)
-        except EmptyPage:
-            paginated_posts = paginator.page(paginator.num_pages)
+            page_num = int(page)
+            if page_num < 1:
+                page_num = 1
+            elif page_num > total_pages and total_pages > 0:
+                page_num = total_pages
+        except (ValueError, TypeError):
+            page_num = 1
+
+        start_idx = (page_num - 1) * page_size
+        end_idx = start_idx + page_size
+        paginated_posts = visible_posts[start_idx:end_idx]
 
         serializer = PostSerializer(paginated_posts, many=True)
 
         response_data = {
-            'count': paginator.count,
-            'total_pages': paginator.num_pages,
-            'current_page': paginated_posts.number,
+            'count': total_count,
+            'total_pages': total_pages,
+            'current_page': page_num,
             'page_size': page_size,
-            'has_next': paginated_posts.has_next(),
-            'has_previous': paginated_posts.has_previous(),
+            'has_next': page_num < total_pages,
+            'has_previous': page_num > 1,
             'results': serializer.data
         }
 
-        logger.info(f"Feed retrieved: page {paginated_posts.number}/{paginator.num_pages}, {paginator.count} total posts")
+        logger.info(f"Feed retrieved: page {page_num}/{total_pages}, {total_count} visible posts")
 
         return Response(response_data, status=status.HTTP_200_OK)
 
@@ -354,28 +464,31 @@ class FeedView(APIView):
 class ConfigView(APIView):
     """
     View to check and update configuration settings.
-    
-    Demonstrates Singleton pattern usage with ConfigManager.
-    GET: Retrieve all configuration settings.
-    POST: Update a configuration setting.
     """
     authentication_classes = [TokenAuthentication]
     permission_classes = [AllowAny]
     
     def get(self, request):
         """Return all configuration settings from Singleton."""
-        return Response({
-            'settings': config.settings
-        })
+        return Response({'settings': config.settings})
     
     def post(self, request):
-        """Update a configuration setting in Singleton."""
+        """Update a configuration setting in Singleton (admin only)."""
+        user = get_user_from_request(request)
+        
+        # Only admins can update config
+        if user is None or not user.is_admin():
+            return Response(
+                {"error": "Admin access required to update configuration."}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
         key = request.data.get('key')
         value = request.data.get('value')
         
         if key:
             config.set_setting(key, value)
-            logger.info(f"Config updated: {key} = {value}")
+            logger.info(f"Config updated by {user.username}: {key} = {value}")
             return Response({
                 'message': f'Setting {key} updated successfully',
                 'settings': config.settings
@@ -386,9 +499,6 @@ class ConfigView(APIView):
 class ProtectedView(APIView):
     """
     Protected endpoint requiring token authentication.
-    
-    GET: Returns success message if user is authenticated.
-    Used to verify token-based authentication is working.
     """
     authentication_classes = [TokenAuthentication]
     permission_classes = [IsAuthenticated]

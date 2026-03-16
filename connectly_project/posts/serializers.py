@@ -14,16 +14,23 @@ class PostSerializer(serializers.ModelSerializer):
     """
     Serializer for Post model.
     
-    Includes computed fields for like_count and comment_count
-    to avoid additional API calls for this common data.
+    Includes:
+    - Privacy settings (public, private, friends_only)
+    - Computed fields for like_count and comment_count
+    - Author information
     """
     comments = serializers.StringRelatedField(many=True, read_only=True)
     like_count = serializers.SerializerMethodField()
     comment_count = serializers.SerializerMethodField()
+    author_username = serializers.CharField(source='author.username', read_only=True)
 
     class Meta:
         model = Post
-        fields = ['id', 'title', 'content', 'post_type', 'metadata', 'author', 'created_at', 'comments', 'like_count', 'comment_count']
+        fields = [
+            'id', 'title', 'content', 'post_type', 'privacy', 
+            'metadata', 'author', 'author_username', 'created_at', 
+            'comments', 'like_count', 'comment_count'
+        ]
 
     def get_like_count(self, obj):
         """Return the total number of likes on this post."""
@@ -33,6 +40,13 @@ class PostSerializer(serializers.ModelSerializer):
         """Return the total number of comments on this post."""
         return obj.comments.count()
 
+    def validate_privacy(self, value):
+        """Validate privacy setting."""
+        valid_options = [choice[0] for choice in Post.PRIVACY_CHOICES]
+        if value not in valid_options:
+            raise serializers.ValidationError(f"Invalid privacy setting. Must be one of: {valid_options}")
+        return value
+
 
 class CommentSerializer(serializers.ModelSerializer):
     """
@@ -41,9 +55,11 @@ class CommentSerializer(serializers.ModelSerializer):
     Includes validation to ensure post and author exist,
     and that comment text is not empty.
     """
+    author_username = serializers.CharField(source='author.username', read_only=True)
+
     class Meta:
         model = Comment
-        fields = ['id', 'text', 'author', 'post', 'created_at']
+        fields = ['id', 'text', 'author', 'author_username', 'post', 'created_at']
 
     def validate_post(self, value):
         """Validate that the post exists."""
@@ -67,9 +83,6 @@ class CommentSerializer(serializers.ModelSerializer):
 class LikeSerializer(serializers.ModelSerializer):
     """
     Serializer for Like model.
-    
-    Includes validation to prevent duplicate likes
-    (same user liking the same post twice).
     """
     class Meta:
         model = Like
@@ -85,9 +98,6 @@ class LikeSerializer(serializers.ModelSerializer):
 class FollowSerializer(serializers.ModelSerializer):
     """
     Serializer for Follow model.
-    
-    Includes readable usernames for both follower and following users.
-    Validates that users cannot follow themselves or duplicate follows.
     """
     follower_username = serializers.CharField(source='follower.username', read_only=True)
     following_username = serializers.CharField(source='following.username', read_only=True)

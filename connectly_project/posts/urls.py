@@ -1,7 +1,7 @@
 """
 URL configuration for the Posts API.
 
-Post-related endpoints are defined here.
+Post-related endpoints with RBAC support.
 """
 
 from django.urls import path
@@ -10,6 +10,7 @@ from .views import (
     PostDetailView,
     CreatePostView,
     CommentListCreate,
+    CommentDeleteView,
     PostLikeView,
     PostCommentCreateView,
     PostCommentsListView,
@@ -30,11 +31,12 @@ urlpatterns = [
     
     # Comment endpoints
     path('comments/', CommentListCreate.as_view(), name='comment-list-create'),
+    path('comments/<int:pk>/', CommentDeleteView.as_view(), name='comment-delete'),
     
     # Feed endpoint
     path('feed/', FeedView.as_view(), name='feed'),
     
-    # Config endpoint (Singleton demo)
+    # Config endpoint (admin only for POST)
     path('config/', ConfigView.as_view(), name='config'),
     
     # Protected endpoint
