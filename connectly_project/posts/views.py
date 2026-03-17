@@ -3,6 +3,11 @@ Views for the Connectly Posts API.
 
 Handles post CRUD operations, comments, likes, and news feed
 with Role-Based Access Control (RBAC) and privacy settings.
+
+Performance optimizations:
+- Query optimization with select_related and prefetch_related
+- Caching for feed endpoints
+- Standardized pagination
 """
 
 from rest_framework.views import APIView
@@ -10,12 +15,17 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.authentication import TokenAuthentication
-from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
+from django.db.models import Count, Prefetch
 
 from users.models import User
 from .models import Post, Comment, Like, Follow
 from .serializers import PostSerializer, CommentSerializer
 from .permissions import IsAdmin, IsModeratorOrAbove, IsPostAuthorOrAdmin, CanViewPost
+from .cache_utils import (
+    get_feed_cache_key, get_cached_feed, set_cached_feed,
+    invalidate_feed_cache, invalidate_post_cache, get_cache_stats,
+    FEED_CACHE_TIMEOUT
+)
 from singletons.logger_singleton import LoggerSingleton
 from singletons.config_manager import ConfigManager
 from factories.post_factory import PostFactory
@@ -41,22 +51,50 @@ def get_user_from_request(request):
     return None
 
 
+def get_optimized_posts_queryset():
+    """
+    Return optimized queryset with related data preloaded.
+    
+    Query Optimization:
+    - select_related: For ForeignKey relationships (single query JOIN)
+    - prefetch_related: For reverse ForeignKey/ManyToMany (separate query, but cached)
+    - annotate: For aggregations (count of likes, comments)
+    
+    Returns:
+        QuerySet: Optimized Post queryset ordered by creation date
+    """
+    return Post.objects.select_related(
+        'author'  # Preload author data in same query
+    ).prefetch_related(
+        'likes',      # Preload likes
+        'comments',   # Preload comments
+        Prefetch(
+            'comments',
+            queryset=Comment.objects.select_related('author'),
+            to_attr='prefetched_comments'
+        )
+    ).annotate(
+        likes_count=Count('likes', distinct=True),
+        comments_count=Count('comments', distinct=True)
+    ).order_by('-created_at')
+
+
 class PostListCreate(APIView):
     """
-    API endpoint for post management.
+    API endpoint for post management with query optimization.
     
-    GET: Retrieve a list of all public posts.
+    GET: Retrieve a list of all public posts (optimized).
     POST: Create a new post with optional privacy setting.
     """
     authentication_classes = [TokenAuthentication]
     permission_classes = [AllowAny]
 
     def get(self, request):
-        """Return all public posts (privacy-aware)."""
+        """Return all public posts with optimized queries."""
         user = get_user_from_request(request)
         
-        # Get all posts
-        posts = Post.objects.all().order_by('-created_at')
+        # Use optimized queryset
+        posts = get_optimized_posts_queryset()
         
         # Filter based on privacy settings
         visible_posts = [post for post in posts if post.is_visible_to(user)]
@@ -70,6 +108,10 @@ class PostListCreate(APIView):
         if serializer.is_valid():
             serializer.save()
             logger.info(f"Post created with privacy: {request.data.get('privacy', 'public')}")
+            
+            # Invalidate feed cache when new post is created
+            invalidate_feed_cache()
+            
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -88,7 +130,10 @@ class PostDetailView(APIView):
     def get(self, request, pk):
         """Return a specific post if user has permission to view it."""
         try:
-            post = Post.objects.get(pk=pk)
+            # Use select_related for optimized query
+            post = Post.objects.select_related('author').prefetch_related(
+                'likes', 'comments'
+            ).get(pk=pk)
         except Post.DoesNotExist:
             return Response({"error": "Post not found."}, status=status.HTTP_404_NOT_FOUND)
         
@@ -108,7 +153,7 @@ class PostDetailView(APIView):
     def put(self, request, pk):
         """Update a post (author or admin only)."""
         try:
-            post = Post.objects.get(pk=pk)
+            post = Post.objects.select_related('author').get(pk=pk)
         except Post.DoesNotExist:
             return Response({"error": "Post not found."}, status=status.HTTP_404_NOT_FOUND)
         
@@ -129,13 +174,18 @@ class PostDetailView(APIView):
         if serializer.is_valid():
             serializer.save()
             logger.info(f"Post {pk} updated by {user.username}")
+            
+            # Invalidate caches
+            invalidate_post_cache(pk)
+            invalidate_feed_cache()
+            
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def delete(self, request, pk):
         """Delete a post (author or admin only)."""
         try:
-            post = Post.objects.get(pk=pk)
+            post = Post.objects.select_related('author').get(pk=pk)
         except Post.DoesNotExist:
             return Response({"error": "Post not found."}, status=status.HTTP_404_NOT_FOUND)
         
@@ -154,6 +204,11 @@ class PostDetailView(APIView):
         
         post.delete()
         logger.info(f"Post {pk} deleted by {user.username} (role: {user.role})")
+        
+        # Invalidate caches
+        invalidate_post_cache(pk)
+        invalidate_feed_cache()
+        
         return Response({"message": "Post deleted successfully."}, status=status.HTTP_200_OK)
 
 
@@ -193,6 +248,9 @@ class CreatePostView(APIView):
             
             logger.info(f"Post created with ID: {post.id}, privacy: {post.privacy}")
             
+            # Invalidate feed cache
+            invalidate_feed_cache()
+            
             return Response({
                 'message': 'Post created successfully!',
                 'post_id': post.id,
@@ -207,14 +265,15 @@ class CreatePostView(APIView):
 
 class CommentListCreate(APIView):
     """
-    API endpoint for comment management.
+    API endpoint for comment management with query optimization.
     """
     authentication_classes = [TokenAuthentication]
     permission_classes = [AllowAny]
 
     def get(self, request):
-        """Return all comments."""
-        comments = Comment.objects.all()
+        """Return all comments with optimized queries."""
+        # Use select_related for optimized query
+        comments = Comment.objects.select_related('author', 'post').all()
         serializer = CommentSerializer(comments, many=True)
         return Response(serializer.data)
 
@@ -223,6 +282,10 @@ class CommentListCreate(APIView):
         serializer = CommentSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save()
+            
+            # Invalidate feed cache (comment counts changed)
+            invalidate_feed_cache()
+            
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -239,7 +302,8 @@ class CommentDeleteView(APIView):
     def delete(self, request, pk):
         """Delete a comment with role-based permissions."""
         try:
-            comment = Comment.objects.get(pk=pk)
+            # Use select_related for optimized query
+            comment = Comment.objects.select_related('author', 'post', 'post__author').get(pk=pk)
         except Comment.DoesNotExist:
             return Response({"error": "Comment not found."}, status=status.HTTP_404_NOT_FOUND)
         
@@ -265,6 +329,10 @@ class CommentDeleteView(APIView):
         
         comment.delete()
         logger.info(f"Comment {pk} deleted by {user.username} (role: {user.role})")
+        
+        # Invalidate feed cache
+        invalidate_feed_cache()
+        
         return Response({"message": "Comment deleted successfully."}, status=status.HTTP_200_OK)
 
 
@@ -278,7 +346,7 @@ class PostLikeView(APIView):
     def post(self, request, pk):
         """Like a post (only if user can view it)."""
         try:
-            post = Post.objects.get(pk=pk)
+            post = Post.objects.select_related('author').get(pk=pk)
         except Post.DoesNotExist:
             logger.warning(f"Like failed: Post {pk} not found")
             return Response({"error": "Post not found."}, status=status.HTTP_404_NOT_FOUND)
@@ -303,6 +371,10 @@ class PostLikeView(APIView):
 
         if created:
             logger.info(f"{user.username} liked post {post.id}")
+            
+            # Invalidate feed cache (like counts changed)
+            invalidate_feed_cache()
+            
             return Response({"message": "Post liked successfully."}, status=status.HTTP_201_CREATED)
         else:
             return Response({"message": "You already liked this post."}, status=status.HTTP_200_OK)
@@ -318,7 +390,7 @@ class PostCommentCreateView(APIView):
     def post(self, request, pk):
         """Add a comment to a post (only if user can view it)."""
         try:
-            post = Post.objects.get(pk=pk)
+            post = Post.objects.select_related('author').get(pk=pk)
         except Post.DoesNotExist:
             logger.warning(f"Comment failed: Post {pk} not found")
             return Response({"error": "Post not found."}, status=status.HTTP_404_NOT_FOUND)
@@ -345,6 +417,9 @@ class PostCommentCreateView(APIView):
 
         comment = Comment.objects.create(text=text, author=user, post=post)
         logger.info(f"{user.username} commented on post {post.id}")
+        
+        # Invalidate feed cache
+        invalidate_feed_cache()
 
         serializer = CommentSerializer(comment)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -360,7 +435,7 @@ class PostCommentsListView(APIView):
     def get(self, request, pk):
         """Return all comments for a post (if user can view the post)."""
         try:
-            post = Post.objects.get(pk=pk)
+            post = Post.objects.select_related('author').get(pk=pk)
         except Post.DoesNotExist:
             return Response({"error": "Post not found."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -373,37 +448,56 @@ class PostCommentsListView(APIView):
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        comments = Comment.objects.filter(post=post).order_by('-created_at')
+        # Use select_related for optimized query
+        comments = Comment.objects.select_related('author').filter(post=post).order_by('-created_at')
         serializer = CommentSerializer(comments, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class FeedView(APIView):
     """
-    News Feed endpoint with privacy filtering.
+    News Feed endpoint with caching and privacy filtering.
     
-    Only returns posts the user has permission to view based on privacy settings.
+    Features:
+    - Caching for feed results
+    - Query optimization with select_related/prefetch_related
+    - Standardized pagination
+    - Privacy-aware filtering
     """
     authentication_classes = [TokenAuthentication]
     permission_classes = [AllowAny]
 
     def get(self, request):
-        """Return paginated news feed with privacy filtering."""
-        page = request.query_params.get('page', 1)
+        """Return paginated news feed with caching and privacy filtering."""
+        # Get pagination parameters
+        page = int(request.query_params.get('page', 1))
         page_size = request.query_params.get('page_size', config.get_setting('DEFAULT_PAGE_SIZE'))
         user_id = request.query_params.get('user_id')
         feed_type = request.query_params.get('feed_type', 'all')
-
-        # Get requesting user for privacy checks
-        requesting_user = get_user_from_request(request)
 
         try:
             page_size = min(int(page_size), 50)
         except (ValueError, TypeError):
             page_size = config.get_setting('DEFAULT_PAGE_SIZE')
 
-        # Base queryset
-        posts = Post.objects.all().order_by('-created_at')
+        # Get requesting user for privacy checks
+        requesting_user = get_user_from_request(request)
+
+        # Generate cache key
+        cache_key = get_feed_cache_key(
+            user_id=user_id,
+            feed_type=feed_type,
+            page=page,
+            page_size=page_size
+        )
+
+        # Try to get cached response
+        cached_data = get_cached_feed(cache_key)
+        if cached_data:
+            return Response(cached_data, status=status.HTTP_200_OK)
+
+        # Use optimized queryset
+        posts = get_optimized_posts_queryset()
 
         # Apply feed_type filters
         if feed_type == 'following' and user_id:
@@ -453,12 +547,52 @@ class FeedView(APIView):
             'page_size': page_size,
             'has_next': page_num < total_pages,
             'has_previous': page_num > 1,
+            'cached': False,
             'results': serializer.data
         }
+
+        # Cache the response
+        set_cached_feed(cache_key, response_data, FEED_CACHE_TIMEOUT)
 
         logger.info(f"Feed retrieved: page {page_num}/{total_pages}, {total_count} visible posts")
 
         return Response(response_data, status=status.HTTP_200_OK)
+
+
+class CacheStatsView(APIView):
+    """
+    Endpoint to check and manage cache statistics.
+    
+    GET: Return cache status and statistics.
+    DELETE: Clear all caches (admin only).
+    """
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        """Return cache statistics."""
+        stats = get_cache_stats()
+        return Response({
+            'cache_stats': stats,
+            'message': 'Cache is active'
+        })
+
+    def delete(self, request):
+        """Clear all caches (admin only)."""
+        user = get_user_from_request(request)
+        
+        if user is None or not user.is_admin():
+            return Response(
+                {"error": "Admin access required to clear cache."}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        invalidate_feed_cache()
+        logger.info(f"Cache cleared by admin {user.username}")
+        
+        return Response({
+            'message': 'All caches cleared successfully'
+        })
 
 
 class ConfigView(APIView):

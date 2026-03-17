@@ -1,7 +1,7 @@
 """
 URL configuration for the Posts API.
 
-Post-related endpoints with RBAC support.
+Post-related endpoints with RBAC support and caching.
 """
 
 from django.urls import path
@@ -17,6 +17,7 @@ from .views import (
     FeedView,
     ConfigView,
     ProtectedView,
+    CacheStatsView,
 )
 from .google_auth import GoogleLoginView, GoogleAuthStatusView
 
@@ -35,6 +36,9 @@ urlpatterns = [
     
     # Feed endpoint
     path('feed/', FeedView.as_view(), name='feed'),
+    
+    # Cache management endpoint
+    path('cache/stats/', CacheStatsView.as_view(), name='cache-stats'),
     
     # Config endpoint (admin only for POST)
     path('config/', ConfigView.as_view(), name='config'),

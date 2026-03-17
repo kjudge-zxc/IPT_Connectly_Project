@@ -200,4 +200,26 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticatedOrReadOnly',
     ],
+    # Pagination settings
+    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'PAGE_SIZE': 20,
 }
+
+
+# CACHING CONFIGURATION
+
+# Using Django's built-in caching (LocMemCache for development)
+# For production, use Redis or Memcached
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        'LOCATION': 'connectly-cache',
+        'TIMEOUT': 300,  # Cache timeout in seconds (5 minutes)
+        'OPTIONS': {
+            'MAX_ENTRIES': 1000
+        }
+    }
+}
+
+# Cache key prefix
+CACHE_KEY_PREFIX = 'connectly'
