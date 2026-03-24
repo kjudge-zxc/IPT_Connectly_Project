@@ -61,3 +61,9 @@ Connectly is a social media API project developed for our Integrative Programmin
    `python manage.py runserver`
 
 7. Test the API using Postman
+
+
+## Developers
+Group 14
+ Martin Sheen Cajucom
+ Angelique Gail Macaspac
