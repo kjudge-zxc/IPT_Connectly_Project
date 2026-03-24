@@ -1,4 +1,4 @@
-# Connectly
+# Connectly Project
 
 Connectly is a social media API project developed for our Integrative Programming and Technologies class. It is built using Django and Django REST Framework.
 
@@ -30,7 +30,7 @@ Connectly is a social media API project developed for our Integrative Programmin
 - `posts/` – posts, feed, likes, comments, follow system
 - `connectly_project/` – main project configuration
 
-## Setup Instructions
+## Setup
 1. Clone the repository
 2. Open the project folder
 3. Create and activate a virtual environment
