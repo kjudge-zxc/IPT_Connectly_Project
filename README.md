@@ -3,6 +3,7 @@
 Connectly is a social media API project developed for our Integrative Programming and Technologies class. It is built using Django and Django REST Framework.
 
 ## Features
+
 - User registration and login
 - Role-based access control (Admin, Moderator, User)
 - Follow and unfollow users
@@ -19,26 +20,44 @@ Connectly is a social media API project developed for our Integrative Programmin
 - Likes and comments
 
 ## Tech Stack
+
 - Python
 - Django
-- Django REST Framework
+- Django REST Framework (DRF)
 - SQLite
 - Postman for API testing
 
 ## Project Structure
+
 - `users/` – user management and roles
-- `posts/` – posts, feed, likes, comments, follow system
-- `connectly_project/` – main project configuration
+- `posts/` – posts, feed, likes, comments, and follow system
+- `connectly_project/` – main project 
 
-## Setup
-1. Clone the repository
-2. Open the project folder
+## How to Run the Project
+
+1. Clone the repository  
+   `git clone IPT_Connectly_Project`
+
+2. Go to the project folder  
+   `cd connectly_project`
+
 3. Create and activate a virtual environment
-4. Install dependencies
-5. Run migrations
-6. Start the development server
 
-## Sample Commands
-```bash
-python manage.py migrate
-python manage.py runserver
+   **Windows**  
+   `python -m venv venv`  
+   `venv\Scripts\activate`
+
+   **Mac/Linux**  
+   `python3 -m venv venv`  
+   `source venv/bin/activate`
+
+4. Install dependencies  
+   `pip install -r requirements.txt`
+
+5. Run migrations  
+   `python manage.py migrate`
+
+6. Start the development server  
+   `python manage.py runserver`
+
+7. Test the API using Postman
