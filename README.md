@@ -1,6 +1,6 @@
 # Connectly Project
 
-Connectly is a social media API project developed for our Integrative Programming and Technologies class. It is built using Django and Django REST Framework.
+Connectly is a social media API project developed for our Integrative Programming and Technologies class (S3101). It is built using Django and Django REST Framework.
 
 ## Features
 
@@ -65,5 +65,5 @@ Connectly is a social media API project developed for our Integrative Programmin
 
 ## Developers
 Group 14
- Martin Sheen Cajucom
- Angelique Gail Macaspac
+Martin Sheen Cajucom
+Angelique Gail Macaspac
