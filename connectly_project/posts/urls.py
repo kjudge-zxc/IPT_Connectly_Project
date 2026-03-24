@@ -1,46 +1,52 @@
+"""
+URL configuration for the Posts API.
+
+Post-related endpoints with RBAC support and caching.
+"""
+
 from django.urls import path
 from .views import (
-    PostDetailView, 
-    ProtectedView, 
-    UserListCreate, 
-    PostListCreate, 
-    CommentListCreate, 
-    UserLoginView,
+    PostListCreate,
+    PostDetailView,
     CreatePostView,
-    ConfigView,
+    CommentListCreate,
+    CommentDeleteView,
     PostLikeView,
     PostCommentCreateView,
     PostCommentsListView,
     FeedView,
-    FollowUserView,
-    UserFollowersView,
-    UserFollowingView,
+    ConfigView,
+    ProtectedView,
+    CacheStatsView,
 )
-
 from .google_auth import GoogleLoginView, GoogleAuthStatusView
 
 urlpatterns = [
-    path('users/', UserListCreate.as_view(), name='user-list-create'),
-    path('users/login/', UserLoginView.as_view(), name='user-login'),
-    path('posts/', PostListCreate.as_view(), name='post-list-create'),
+    # Post endpoints
+    path('', PostListCreate.as_view(), name='post-list-create'),
+    path('create/', CreatePostView.as_view(), name='create-post'),
+    path('<int:pk>/', PostDetailView.as_view(), name='post-detail'),
+    path('<int:pk>/like/', PostLikeView.as_view(), name='post-like'),
+    path('<int:pk>/comment/', PostCommentCreateView.as_view(), name='post-comment'),
+    path('<int:pk>/comments/', PostCommentsListView.as_view(), name='post-comments'),
+    
+    # Comment endpoints
     path('comments/', CommentListCreate.as_view(), name='comment-list-create'),
-    path('posts/<int:pk>/', PostDetailView.as_view(), name='post-detail'),
-    path('protected/', ProtectedView.as_view(), name='protected'),
-    path('posts/create/', CreatePostView.as_view(), name='create-post'),
+    path('comments/<int:pk>/', CommentDeleteView.as_view(), name='comment-delete'),
+    
+    # Feed endpoint
+    path('feed/', FeedView.as_view(), name='feed'),
+    
+    # Cache management endpoint
+    path('cache/stats/', CacheStatsView.as_view(), name='cache-stats'),
+    
+    # Config endpoint (admin only for POST)
     path('config/', ConfigView.as_view(), name='config'),
-    path('posts/<int:pk>/like/', PostLikeView.as_view(), name='post-like'),
-    path('posts/<int:pk>/comment/', PostCommentCreateView.as_view(), name='post-comment'),
-    path('posts/<int:pk>/comments/', PostCommentsListView.as_view(), name='post-comments'), 
-
+    
+    # Protected endpoint
+    path('protected/', ProtectedView.as_view(), name='protected'),
+    
     # Google OAuth endpoints
     path('auth/google/login/', GoogleLoginView.as_view(), name='google-login'),
     path('auth/google/status/', GoogleAuthStatusView.as_view(), name='google-status'),
-
-    # Feed endpoint
-    path('feed/', FeedView.as_view(), name='feed'),
-
-    # Follow endpoints
-    path('users/<int:pk>/follow/', FollowUserView.as_view(), name='follow-user'),
-    path('users/<int:pk>/followers/', UserFollowersView.as_view(), name='user-followers'),
-    path('users/<int:pk>/following/', UserFollowingView.as_view(), name='user-following'),
 ]

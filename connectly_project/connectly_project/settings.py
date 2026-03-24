@@ -40,6 +40,7 @@ INSTALLED_APPS = [
     'django.contrib.sites',         # Required for allauth
     'rest_framework',               # Add Django REST Framework
     'posts',                        # Add Posts app
+    'users',                        # Add Users app
     'rest_framework.authtoken',
     'django_extensions',
 
@@ -165,10 +166,9 @@ AUTHENTICATION_BACKENDS = [
     'allauth.account.auth_backends.AuthenticationBackend',
 ]
 
-# Allauth settings
-ACCOUNT_EMAIL_REQUIRED = True
-ACCOUNT_USERNAME_REQUIRED = True
-ACCOUNT_AUTHENTICATION_METHOD = 'username_email'
+# Allauth settings (updated for django-allauth 0.63+)
+ACCOUNT_LOGIN_METHODS = {'email', 'username'}
+ACCOUNT_SIGNUP_FIELDS = ['email*', 'username*', 'password1*', 'password2*']
 ACCOUNT_EMAIL_VERIFICATION = 'none'  # Set to 'mandatory' in production
 
 # REST Auth settings
@@ -200,4 +200,26 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticatedOrReadOnly',
     ],
+    # Pagination settings
+    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'PAGE_SIZE': 20,
 }
+
+
+# CACHING CONFIGURATION
+
+# Using Django's built-in caching (LocMemCache for development)
+# For production, use Redis or Memcached
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        'LOCATION': 'connectly-cache',
+        'TIMEOUT': 300,  # Cache timeout in seconds (5 minutes)
+        'OPTIONS': {
+            'MAX_ENTRIES': 1000
+        }
+    }
+}
+
+# Cache key prefix
+CACHE_KEY_PREFIX = 'connectly'
